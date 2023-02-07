@@ -1,76 +1,170 @@
 package u1_assignment2;
 
 import java.sql.*;
+import java.util.Scanner;
 import java.util.concurrent.locks.*;
+import java.util.logging.*;
 import javax.swing.*;
 
 public class U1_Assignment2 {
-
-    private ReentrantLock lock = new ReentrantLock();
-    private Connection conn;
-
+    String bd = "server";
+    String url = "jdbc:mysql://localhost:3306/server";
+    String username = "root";
+    String password = "";
+    String driver = "com.mysql.cj.jdbc.Driver";
+    Connection cx = null;
+    Statement stmt = null;
+    boolean flag = false;
+    ResultSet rs = null;
+    static ReentrantReadWriteLock lock = new ReentrantReadWriteLock(); 
+  
     public U1_Assignment2() {
-        try {
-            try {
-                Class.forName("com.mysql.cj.jdbc.Driver");
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            conn = DriverManager.getConnection("localhost:3306/server", "root", "");
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        
     }
-
-    public void updateRecord(int id, String newValue) {
-        lock.lock();
+    
+    public Connection conectar(){
         try {
-            PreparedStatement statement = conn.prepareStatement("UPDATE records SET tel = ? WHERE id = ?");
-            statement.setString(1, newValue);
-            statement.setInt(2, id);
-            statement.executeUpdate();
-            System.out.println("Record updated successfully.");
-        } catch (SQLException e) {
-            e.printStackTrace();
-        } finally {
-            lock.unlock();
-        }
-    }
+            Class.forName(driver);
+            cx=DriverManager.getConnection(url, username, password);
+            System.out.println("Connection successful");
+            stmt = cx.createStatement();
+            String checkSql = "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'concurrent'";
+            stmt = cx.createStatement();
+            rs = stmt.executeQuery(checkSql);
+            stmt = cx.createStatement();
+                
+                flag = true;
+                if (rs.next()) { //si existe la base de datos
+                    Statement stmt = cx.createStatement();
+                    Scanner sc = new Scanner(System.in);
 
-    public int consultRecord(int id) {
-        synchronized (this) {
-            try {
-                PreparedStatement statement = conn.prepareStatement("SELECT name FROM records WHERE id = ?");
-                statement.setInt(1, id);
-                ResultSet result = statement.executeQuery();
-                if (result.next()) {
-                    System.out.println("Record consulted successfully.");
-                    return result.getInt("value");
-                } else {
-                    return -1;
+                // borrar la base de datos si existe
+                stmt.executeUpdate("DROP DATABASE IF EXISTS server");
+                String sql = "CREATE DATABASE concurrent";
+                stmt.executeUpdate(sql);
+                url = "jdbc:mysql://localhost:3306/server";
+            cx=DriverManager.getConnection(url, username, password);
+            
+            stmt = cx.createStatement();
+            stmt.executeUpdate("DROP TABLE IF EXISTS prueba"); //borrar tabla si exixte
+             String sql2 = "CREATE TABLE prueba " +
+                     " (name VARCHAR(255)PRIMARY KEY NOT NULL, " +
+                   "age INT , " +                  
+                   " id INT)";
+            stmt.executeUpdate(sql2); 
+           
+            // Insert data into the database
+            stmt.executeUpdate("INSERT INTO prueba (name, age,id) VALUES ('John', 30,3)");
+                
+            
+                System.out.println("1 for update 2 for read");
+                int op = sc.nextInt();
+                if(op!=1){
+                    Thread Reader = new Thread(new Reader());
+                    Reader.start();
+                    
+                    
                 }
-            } catch (SQLException e) {
-                e.printStackTrace();
-                return -1;
+                else { //si selecciona update
+                     Thread Writter = new Thread(new Writter());
+                      Writter.start();
+                }
+            } 
+        } catch (ClassNotFoundException |SQLException ex) {
+            System.out.println("Connection Failed"+bd);
+            Logger.getLogger(U1_Assignment2.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        
+        return cx;
+    }
+    
+    class Reader implements Runnable{
+
+    public void run(){
+        try{
+            lock.writeLock().lock();
+            cx=DriverManager.getConnection(url, username, password);
+            stmt = cx.createStatement();
+        String selectSql = "SELECT name, age, id FROM prueba";
+        stmt = cx.prepareStatement(selectSql);
+            ResultSet rs = stmt.executeQuery(selectSql);
+            while (rs.next()) {
+            
+           
+            int id = rs.getInt("id");
+            String name = rs.getString("name");
+             int age = rs.getInt("age");
+            System.out.println("id: " + id + " name: " + name + " age: " + age);
+      }
+            
+      rs.close();
+        } catch (SQLException ex) {
+            System.out.println("Connection Failed"+bd);
+            Logger.getLogger(U1_Assignment2.class.getName()).log(Level.SEVERE, null, ex);
+        } finally{
+        lock.writeLock().unlock();
+        }
+        
+        
+    }
+}
+    class Writter implements Runnable{
+
+    public void run(){
+        
+        PreparedStatement stmt2 = null;
+        
+        try {
+            lock.writeLock().lock();
+            cx=DriverManager.getConnection(url, username, password);
+            stmt = cx.createStatement();
+            Scanner input = new Scanner(System.in);
+            
+            
+            
+            
+            
+                //  UPDATE DE DATOS
+                System.out.print("Update name: ");
+                String firstValue = input.nextLine();
+                System.out.print("Update age: ");
+                int secondValue = input.nextInt();
+                System.out.print("Update id: ");
+                int thirdValue = input.nextInt();
+                
+                stmt2 = cx.prepareStatement("UPDATE prueba SET name = ?, age = ?, id = ?");
+                
+                stmt2.setString(1, firstValue);
+                stmt2.setInt(2, secondValue);
+                stmt2.setInt(3, thirdValue);
+           
+      
+     
+      
+      // EJECUTAR STATEMENT
+                int rowsAffected = stmt2.executeUpdate();
+                System.out.println("Number of rows updated: " + rowsAffected);
+                System.out.println("Data inserted successfully");
+            } catch (SQLException ex) {
+                Logger.getLogger(U1_Assignment2.class.getName()).log(Level.SEVERE, null, ex);
+            } finally{
+                lock.writeLock().unlock();
+
             }
         }
     }
-
-    public static void main(String[] args) {
-        U1_Assignment2 server = new U1_Assignment2();
-        String value = "";
-
-        Thread updateThread = new Thread(() -> {
-            JOptionPane.showInputDialog("New number", value);
-            server.updateRecord(1, value);
-        });
-        updateThread.start();
-
-        Thread consultThread = new Thread(() -> {
-            int record = server.consultRecord(1);
-            System.out.println("Consulted record value: " + record);
-        });
-        consultThread.start();
+    
+    public void desconectar(){
+        try {
+            cx.close();
+        } catch (SQLException ex) {
+            Logger.getLogger(U1_Assignment2.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    
     }
-
+    public static void main(String[] args){
+        U1_Assignment2 dr= new U1_Assignment2();
+        dr.conectar();
+        
+    }
 }
